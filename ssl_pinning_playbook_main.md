@@ -11,13 +11,13 @@ This playbook serves as the **central navigation hub** for SSL Public Key Pinnin
 ## 📋 Playbook Structure
 
 ### 📚 [Section 0: Understanding SSL Pinning](./section%200%20-%20understanding%20ssl%20pinning.md)
-**What you'll find:** Fundamental concepts, behavior scenarios, and troubleshooting guide for SSL certificate pinning.
-- SSL pinning behavior matrix with detailed scenarios
-- Domain-specific pinning behavior and mixed domain handling
-- Kill-switch scenarios and emergency procedures
-- Performance impact analysis and optimization considerations
-- Certificate rotation scenarios and error handling
-- Security implications and risk mitigation strategies
+**What you'll find:** Comprehensive conceptual foundation covering SSL pinning fundamentals and practical scenarios.
+- **Pinning Behavior Matrix:** Detailed scenarios for successful pinning, failures, mixed domains, and kill switch states
+- **Domain-Specific Behavior:** How pinning works with different hostname configurations
+- **Certificate Rotation Scenarios:** Expected behaviors during certificate updates and rotations
+- **Performance Analysis:** Impact assessment and optimization strategies
+- **Troubleshooting Guide:** Common issues, error patterns, and resolution approaches
+- **Security Implications:** Risk analysis and mitigation strategies
 
 ---
 
@@ -49,29 +49,48 @@ This playbook serves as the **central navigation hub** for SSL Public Key Pinnin
 ---
 
 ### ⚙️ [Section 4: Pin Extraction Commands](./section%204%20-%20pin%20extraction%20commands.md)
-**What you'll find:** Technical procedures for extracting SPKI hashes from certificates and keys.
-- OpenSSL commands for live certificate extraction
-- Backup keypair pin generation procedures
-- Validation and verification techniques
-- Security considerations for pin management
+**What you'll find:** Step-by-step technical guide for extracting SPKI hashes from live certificates and backup keys.
+- **Live Certificate Extraction:** OpenSSL commands to extract pins from running servers
+- **Backup Key Generation:** Creating and extracting pins from backup keypairs
+- **Pin Validation:** Verification techniques to ensure pin accuracy
+- **Security Best Practices:** Secure environments and proper key handling
+- Complete workflow from certificate discovery to pin implementation
 
 ---
 
 ### 🎯 [Section 5: Pinning Scope](./section%205%20-%20pinning%20scope.md)
-**What you'll find:** Detailed rules for when pinning applies and security implications.
-- Exact hostname matching vs wildcard pinning
-- Subdomain handling and inheritance rules
-- External domain interaction policies
-- Risk assessment for scope decisions
+**What you'll find:** Practical scoping decisions using real Kredit Plus architecture examples.
+- **Architecture Analysis:** Real-world API gateway setup with `apigee.kreditplus.com` as primary target
+- **Pinning Scope Rules:** When to pin vs. when to use normal TLS validation  
+- **Risk Assessment Matrix:** Security benefits vs. operational complexity trade-offs
+- **Decision Framework:** Clear criteria for determining pinning scope
+- **Implementation Examples:** Concrete scenarios with recommended approaches
 
 ---
 
 ### 🛠️ [Section 6: Platform Implementation Summary](./section%206%20-%20platform%20implementation%20summary.md)
-**What you'll find:** Technology-specific implementation approaches across mobile and server platforms.
-- Android (Kotlin): OkHttp CertificatePinner, Network Security Config
-- iOS (Swift): URLSessionDelegate, TrustKit integration
-- Flutter: dio_certificate_pin, custom adapters
-- Server-side: Go, Nuxt.js implementation strategies
+**What you'll find:** Basic SSL pinning implementations for all supported platforms with embedded certificate pins.
+- **Android (Kotlin):** OkHttp CertificatePinner with hardcoded SPKI hashes
+- **iOS (Swift):** URLSessionDelegate with certificate validation
+- **Flutter (Dart):** Dio certificate pinning with validation interceptors  
+- **Nuxt.js (JavaScript):** Server-side HTTPS agent with custom certificate validation
+- Build-time pin embedding and basic certificate validation logic
+
+#### 🔄 [Section 6 Part 2: Kill Switch Implementation](./section%206%20part%202%20-%20main.md)
+**What you'll find:** Enhanced implementations with Firebase Remote Config for instant kill switch control.
+- **Platform-Specific Guides:** [Android](./section%206%20part%202%20-%20android.md) | [iOS](./section%206%20part%202%20-%20ios.md) | [Flutter](./section%206%20part%202%20-%20flutter.md) | [Nuxt.js](./section%206%20part%202%20-%20nuxtjs.md)
+- Remote configuration integration for dynamic pinning control
+- Emergency kill switch capabilities without app store updates
+- Host-specific targeting and version gating
+- Safe defaults and fallback mechanisms
+
+#### 🚀 [Section 6 Part 3: Advanced Implementation](./section%206%20part%203%20-%20advanced%20implementation.md)
+**What you'll find:** Production-ready implementation with advanced features for complex enterprise scenarios.
+- **Swift Example:** Comprehensive implementation with gradual rollout capabilities
+- Remote pin storage and dynamic pin updates
+- Advanced monitoring, telemetry, and performance tracking
+- Complex targeting rules and A/B testing integration
+- Production monitoring and incident response integration
 
 ---
 
@@ -103,11 +122,13 @@ This playbook serves as the **central navigation hub** for SSL Public Key Pinnin
 ---
 
 ### ⚡ [Section 10: Remote Configuration Management](./section%2010%20-%20remote%20configuration%20management.md)
-**What you'll find:** Dynamic control systems for pinning behavior without app updates.
-- Remote config schema and parameter definitions
-- Gradual rollout and targeting strategies
-- Emergency kill-switch activation procedures
-- Configuration security and distribution mechanisms
+**What you'll find:** Comprehensive configuration management strategy and operational procedures for Firebase Remote Config.
+- **Configuration Schema:** Simple and standardized JSON schema for `enabled`, `target_hosts`, and `min_app_version`
+- **Firebase Console Setup:** Condition-based targeting for staging, production, and emergency scenarios
+- **Emergency Procedures:** Step-by-step kill switch activation and re-enablement workflows
+- **Distribution Strategy:** Configuration propagation timelines and caching strategies
+- **Security and Monitoring:** Access control, configuration integrity, and change alerting
+- **Operational Best Practices:** Change processes, validation checklists, and incident response
 
 ---
 
