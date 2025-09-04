@@ -3,6 +3,65 @@
 ## Overview
 This comprehensive guide walks you through the process of extracting SPKI (Subject Public Key Info) hashes from certificates for SSL pinning implementation. Follow these steps to securely generate and validate certificate pins.
 
+## What This Section Generates
+
+**🔑 Primary Output: Base64-Encoded SPKI Hashes**
+
+The commands in this section generate Base64-encoded SHA-256 hashes of public keys (SPKI), which look like this:
+```
+YLh1dHA681GQhQHU04xGhB/F8R2HZXZQh1m52HhQc=
+```
+
+**📋 Complete Pin Set Example:**
+After following this guide, you'll have pins like:
+```bash
+# Primary pin (from live server)
+PRIMARY_PIN="YLh1dHA681GQhQHU04xGhB/F8R2HZXZQh1m52HhQc="
+
+# Backup pin (from backup keypair)  
+BACKUP_PIN="ZMi2eEA123ABcDefGHI04xGhB/F8R2HZXZQh1m98W="
+```
+
+## How These Pins Are Used in Section 6
+
+**🛠️ Implementation Context:**
+The pins generated here become **hardcoded string constants** in your application code (Section 6).
+
+**Example from Section 6 - iOS Implementation:**
+```swift
+class CertificatePinner: NSObject {
+    private let pinnedHashes: Set<String> = [
+        "YLh1dHA681GQhQHU04xGhB/F8R2HZXZQh1m52HhQc=", // ← FROM SECTION 4
+        "ZMi2eEA123ABcDefGHI04xGhB/F8R2HZXZQh1m98W="  // ← FROM SECTION 4
+    ]
+}
+```
+
+**Example from Section 6 - Android Implementation:**
+```kotlin
+class CertificatePinner {
+    companion object {
+        private const val PRIMARY_PIN = "sha256/YLh1dHA681GQhQHU04xGhB/F8R2HZXZQh1m52HhQc=" // ← FROM SECTION 4
+        private const val BACKUP_PIN = "sha256/ZMi2eEA123ABcDefGHI04xGhB/F8R2HZXZQh1m98W="   // ← FROM SECTION 4
+    }
+}
+```
+
+**🔄 Workflow Connection:**
+```
+Section 4 (This Section)     →     Section 6 (Implementation)
+Extract SPKI hashes                Hardcode pins in app
+from certificates                  Compare at runtime
+                                  
+OUTPUT: Base64 strings       →     INPUT: String constants
+```
+
+**⚠️ Important Notes:**
+- **These are just strings**, but they represent cryptographic hashes
+- **Format matters**: Some platforms need `sha256/` prefix, others don't
+- **Security critical**: Wrong pins = broken app connectivity
+- **Version control**: These pins go into your source code and app builds
+
 ## Prerequisites
 Before you begin, ensure you have:
 - OpenSSL installed on your system
