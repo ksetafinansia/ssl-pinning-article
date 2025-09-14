@@ -24,34 +24,43 @@ Best practices and considerations
 - Internal connection security (ApiGee -> Backend Services): Your internal connection from Apigee to the backend services is more effectively secured using mutual TLS (mTLS) and/or network-level access controls (e.g., allowlisting). This ensures that only trusted Apigee instances can connect to your backend, and the client-facing pinning is an independent security measure.
 
 
-Created Implementation Files:
-📱 iOS Swift Implementation (ssl-pinning-ios-swift.md)
+Create Implementation Files:
+Public Key Extraction
+- step by step generating public hash & how to implement in apigee
 
-URLSession with custom TrustManager
-Certificate pinning using SHA-256 hashes
-Complete API client with error handling
-Unit and integration tests
-Security best practices
-🤖 Android Kotlin Implementation (ssl-pinning-android-kotlin.md)
+iOS Swift Implementation (ssl-pinning-ios-swift.md)
+- URLSession with custom TrustManager
+- Certificate pinning using SHA-256 hashes
+- Complete API client with error handling
+- Unit and integration tests
+- Security best practices
 
-OkHttp client with CertificatePinner
-Retrofit integration for API calls
-Manual X509TrustManager option
-Network Security Configuration
-Comprehensive testing setup
-🐦 Flutter Dart Implementation (ssl-pinning-flutter-dart.md)
+Android Kotlin Implementation (ssl-pinning-android-kotlin.md)
+- OkHttp client with CertificatePinner
+- Retrofit integration for API calls
+- Manual X509TrustManager option
+- Network Security Configuration
+- Comprehensive testing setup
 
-Two implementation options (plugin + manual)
-Dio HTTP client with interceptors
-Provider pattern for state management
-Cross-platform certificate validation
-Integration with Flutter UI
-🌐 Nuxt.js CMS Implementation (ssl-pinning-nuxtjs-cms.md)
+Flutter Dart Implementation (ssl-pinning-flutter-dart.md)
+- Two implementation options (plugin + manual)
+- Dio HTTP client with interceptors
+- Provider pattern for state management
+- Cross-platform certificate validation
+- Integration with Flutter UI
 
-Server-side certificate validation
-Client-side security composables
-CMS dashboard with security monitoring
-Security middleware and headers
-Browser-compatible approach
+Nuxt.js CMS Implementation (ssl-pinning-nuxtjs-cms.md)
+- Server-side certificate validation
+- Client-side security composables
+- CMS dashboard with security monitoring
+- Security middleware and headers
+- Browser-compatible approach
+
 Key Features Across All Platforms:
-✅ Consistent Pin Format: All use the same Base64 SPKI hashes from Step 1 ✅ Error Handling: Dedicated handling for SSL pinning failures ✅ Kill Switch: Remote configuration to disable pinning ✅ Testing: Unit and integration tests for each platform ✅ Best Practices: Security considerations and troubleshooting ✅ Real-world Usage: Complete examples with UI integration
+- Consistent Pin Format: All use the same Base64 SPKI hashes from 
+- Step 1 
+- Error Handling: Dedicated handling for SSL pinning failures 
+- Kill Switch: Remote configuration to disable pinning 
+- Testing: Unit and integration tests for each platform 
+- Best Practices: Security considerations and troubleshooting 
+- Real-world Usage: Complete examples with UI integration
