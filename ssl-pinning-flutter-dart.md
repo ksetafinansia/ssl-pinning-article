@@ -55,6 +55,10 @@ dependencies:
   
   # Logging
   logger: ^2.0.2
+  
+  # Firebase Remote Config
+  firebase_core: ^2.24.2
+  firebase_remote_config: ^4.3.8
 
 dev_dependencies:
   flutter_test:
@@ -83,39 +87,262 @@ Flutter SSL pinning can be implemented in two ways:
 
 ## Plugin-Based Implementation
 
-### 1. SSL Pinning Configuration
+### 1. SSL Pinning Configuration with Remote Config
 
-Create a configuration class for SSL pinning:
+Create a configuration class for SSL pinning with remote config support:
 
 ```dart
+import 'dart:convert';
+import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:convert/convert.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
+import 'package:logger/logger.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
+
+class RemoteSSLConfig {
+  final String host;
+  final bool isEnabled;
+  final bool isAndroidEnable;
+  final bool isIosEnable;
+  final SSLPins pins;
+
+  RemoteSSLConfig({
+    required this.host,
+    required this.isEnabled,
+    required this.isAndroidEnable,
+    required this.isIosEnable,
+    required this.pins,
+  });
+
+  factory RemoteSSLConfig.fromJson(Map<String, dynamic> json) {
+    return RemoteSSLConfig(
+      host: json['host'],
+      isEnabled: json['is_enabled'] ?? false,
+      isAndroidEnable: json['is_android_enable'] ?? false,
+      isIosEnable: json['is_ios_enable'] ?? false,
+      pins: SSLPins.fromJson(json['pins']),
+    );
+  }
+}
+
+class SSLPins {
+  final String primary;
+  final String backup;
+  final String emergency;
+
+  SSLPins({
+    required this.primary,
+    required this.backup,
+    required this.emergency,
+  });
+
+  factory SSLPins.fromJson(Map<String, dynamic> json) {
+    return SSLPins(
+      primary: json['primary'],
+      backup: json['backup'],
+      emergency: json['emergency'],
+    );
+  }
+
+  List<String> get allHashes => [primary, backup, emergency];
+}
+
+class RemoteConfigResponse {
+  final List<RemoteSSLConfig> configurations;
+
+  RemoteConfigResponse({required this.configurations});
+
+  factory RemoteConfigResponse.fromJson(Map<String, dynamic> json) {
+    return RemoteConfigResponse(
+      configurations: (json['configurations'] as List)
+          .map((config) => RemoteSSLConfig.fromJson(config))
+          .toList(),
+    );
+  }
+}
 
 class SSLPinningConfig {
   static const String _tag = 'SSLPinning';
+  static const String _remoteConfigKey = 'ssl_pinning_configurations';
+  static const String _configCacheKey = 'ssl_pinning_remote_config';
   
-  // Configuration for your Apigee domain
-  static const String apigeeHost = 'your-apigee-domain.com';
-  
-  // Primary and backup public key hashes
-  static const List<String> pinnedHashes = [
-    'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', // Primary hash
-    'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=', // Secondary hash
+  // Fallback configuration
+  static const String defaultHost = 'apigee.kreditplus.com';
+  static const List<String> fallbackHashes = [
+    'sha256/AAAB3NzaC1yc2EAAAA...',
+    'sha256/BBBF4OzaC1yc2EAAAA...',
+    'sha256/CCCG5PzaC1yc2EAAAA...',
   ];
   
-  static const List<String> backupHashes = [
-    'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=', // Backup hash
-  ];
+  static SharedPreferences? _prefs;
+  static List<RemoteSSLConfig> _configurations = [];
+  static FirebaseRemoteConfig? _remoteConfig;
   
-  // Kill switch configuration
-  static const String killSwitchKey = 'ssl_pinning_kill_switch';
+  // Initialize Firebase and load remote config
+  static Future<void> initialize() async {
+    await Firebase.initializeApp();
+    _prefs = await SharedPreferences.getInstance();
+    _remoteConfig = FirebaseRemoteConfig.instance;
+    await _setupRemoteConfig();
+    await loadRemoteConfig();
+  }
   
-  // Get all valid hashes (primary + backup)
-  static List<String> get allValidHashes => [...pinnedHashes, ...backupHashes];
+  // Setup Firebase Remote Config
+  static Future<void> _setupRemoteConfig() async {
+    try {
+      await _remoteConfig?.setConfigSettings(
+        RemoteConfigSettings(
+          fetchTimeout: const Duration(minutes: 1),
+          minimumFetchInterval: const Duration(hours: 1),
+        ),
+      );
+      
+      // Set default values
+      await _remoteConfig?.setDefaults({
+        _remoteConfigKey: json.encode({
+          'configurations': [
+            {
+              'host': defaultHost,
+              'is_enabled': true,
+              'is_android_enable': true,
+              'is_ios_enable': true,
+              'pins': {
+                'primary': fallbackHashes[0],
+                'backup': fallbackHashes[1],
+                'emergency': fallbackHashes[2],
+              }
+            }
+          ]
+        }),
+      });
+      
+      Logger().i('Firebase Remote Config initialized');
+    } catch (e) {
+      Logger().e('Failed to setup Firebase Remote Config: $e');
+    }
+  }
   
-  // Convert to SHA256 format for dio_certificate_pinning
-  static List<String> get sha256Hashes => 
-      allValidHashes.map((hash) => 'sha256/$hash').toList();
+  // Load remote configuration from Firebase
+  static Future<void> loadRemoteConfig() async {
+    try {
+      // Try to load from cache first
+      final cachedConfig = _prefs?.getString(_configCacheKey);
+      if (cachedConfig != null) {
+        final configData = json.decode(cachedConfig);
+        final response = RemoteConfigResponse.fromJson(configData);
+        _configurations = response.configurations;
+      }
+      
+      // Fetch from Firebase Remote Config
+      await _fetchFirebaseRemoteConfig();
+      
+    } catch (e) {
+      Logger().e('Failed to load remote config: $e');
+      _loadFallbackConfig();
+    }
+  }
+  
+  // Fetch configuration from Firebase Remote Config
+  static Future<void> _fetchFirebaseRemoteConfig() async {
+    try {
+      // Fetch and activate remote config
+      await _remoteConfig?.fetchAndActivate();
+      
+      // Get SSL pinning configuration
+      final configString = _remoteConfig?.getString(_remoteConfigKey) ?? '';
+      
+      if (configString.isNotEmpty) {
+        final configData = json.decode(configString);
+        final remoteConfig = RemoteConfigResponse.fromJson(configData);
+        _configurations = remoteConfig.configurations;
+        
+        // Cache the configuration
+        await _prefs?.setString(_configCacheKey, configString);
+        
+        Logger().i('Firebase Remote SSL config updated successfully');
+      } else {
+        Logger().w('Empty configuration received from Firebase Remote Config');
+        if (_configurations.isEmpty) {
+          _loadFallbackConfig();
+        }
+      }
+    } catch (e) {
+      Logger().e('Failed to fetch Firebase Remote Config: $e');
+      if (_configurations.isEmpty) {
+        _loadFallbackConfig();
+      }
+    }
+  }
+  
+  // Load fallback configuration
+  static void _loadFallbackConfig() {
+    _configurations = [
+      RemoteSSLConfig(
+        host: defaultHost,
+        isEnabled: true,
+        isAndroidEnable: true,
+        isIosEnable: true,
+        pins: SSLPins(
+          primary: fallbackHashes[0],
+          backup: fallbackHashes[1],
+          emergency: fallbackHashes[2],
+        ),
+      ),
+    ];
+    Logger().w('Using fallback SSL config');
+  }
+  
+  // Get configuration for specific host
+  static RemoteSSLConfig? getConfigForHost(String host) {
+    return _configurations.firstWhere(
+      (config) => config.host == host,
+      orElse: () => _configurations.firstWhere(
+        (config) => config.host == defaultHost,
+        orElse: () => _configurations.isNotEmpty ? _configurations.first : null,
+      ),
+    );
+  }
+  
+  // Get all valid hashes for host
+  static List<String> getValidHashesForHost(String host) {
+    final config = getConfigForHost(host);
+    if (config == null || !config.isEnabled) {
+      return [];
+    }
+    
+    return _decryptPins(config.pins.allHashes);
+  }
+  
+  // Decrypt pins (implementation depends on your encryption method)
+  static List<String> _decryptPins(List<String> encryptedPins) {
+    // TODO: Implement decryption logic based on your encryption method
+    // For now, return as-is assuming they're already decrypted for demo
+    return encryptedPins;
+  }
+  
+  // Check if SSL pinning is enabled for host
+  static bool isEnabledForHost(String host) {
+    final config = getConfigForHost(host);
+    if (config == null || !config.isEnabled) return false;
+    
+    // Check platform-specific settings
+    if (Platform.isAndroid && !config.isAndroidEnable) return false;
+    if (Platform.isIOS && !config.isIosEnable) return false;
+    
+    return true;
+  }
+  
+  // Force refresh configuration
+  static Future<void> refreshConfig() async {
+    await _fetchFirebaseRemoteConfig();
+  }
+  
+  // Get all configured hosts
+  static List<String> get configuredHosts => 
+      _configurations.map((config) => config.host).toList();
 }
 ```
 
@@ -141,6 +368,7 @@ class PluginSSLPinningManager {
   // Initialize the manager
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
+    await SSLPinningConfig.initialize();
     _dio = await _createSecureDio();
     _logger.i('SSL Pinning Manager initialized');
   }
@@ -160,17 +388,9 @@ class PluginSSLPinningManager {
       },
     );
     
-    // Add SSL pinning interceptor if not disabled
-    if (!await _isKillSwitchEnabled()) {
-      dio.interceptors.add(
-        CertificatePinningInterceptor(
-          allowedSHAFingerprints: SSLPinningConfig.sha256Hashes,
-        ),
-      );
-      _logger.i('SSL Pinning enabled with ${SSLPinningConfig.sha256Hashes.length} hashes');
-    } else {
-      _logger.w('SSL Pinning disabled via kill switch');
-    }
+    // Add SSL pinning interceptor with remote config
+    dio.interceptors.add(_createSSLPinningInterceptor());
+    _logger.i('SSL Pinning interceptor added with remote config support');
     
     // Add logging interceptor
     dio.interceptors.add(_createLoggingInterceptor());
@@ -221,23 +441,55 @@ class PluginSSLPinningManager {
            error.message?.toLowerCase().contains('handshake') == true;
   }
   
-  // Kill switch management
-  Future<bool> _isKillSwitchEnabled() async {
-    return _prefs?.getBool(SSLPinningConfig.killSwitchKey) ?? false;
+  // Create SSL pinning interceptor with remote config
+  InterceptorsWrapper _createSSLPinningInterceptor() {
+    return InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        final hostname = options.uri.host;
+        
+        // Check if SSL pinning is enabled for this host
+        if (!SSLPinningConfig.isEnabledForHost(hostname)) {
+          _logger.w('SSL Pinning disabled for host: $hostname');
+          handler.next(options);
+          return;
+        }
+        
+        // Get valid hashes for the host
+        final validHashes = SSLPinningConfig.getValidHashesForHost(hostname);
+        if (validHashes.isEmpty) {
+          _logger.w('No valid hashes found for host: $hostname');
+        } else {
+          _logger.d('SSL Pinning enabled for $hostname with ${validHashes.length} hashes');
+        }
+        
+        handler.next(options);
+      },
+      onError: (error, handler) {
+        if (_isSSLPinningError(error)) {
+          final hostname = error.requestOptions.uri.host;
+          _logger.e('SSL Pinning validation failed for host: $hostname');
+          handler.next(SSLPinningException.fromDioError(error));
+        } else {
+          handler.next(error);
+        }
+      },
+    );
   }
   
-  Future<void> enableKillSwitch() async {
-    await _prefs?.setBool(SSLPinningConfig.killSwitchKey, true);
-    _logger.w('SSL Pinning kill switch ENABLED');
-    // Recreate Dio instance without pinning
+  // Refresh remote configuration
+  Future<void> refreshRemoteConfig() async {
+    await SSLPinningConfig.refreshConfig();
     _dio = await _createSecureDio();
+    _logger.i('Remote SSL config refreshed and Dio instance recreated');
   }
   
-  Future<void> disableKillSwitch() async {
-    await _prefs?.setBool(SSLPinningConfig.killSwitchKey, false);
-    _logger.i('SSL Pinning kill switch DISABLED');
-    // Recreate Dio instance with pinning
-    _dio = await _createSecureDio();
+  // Get configuration status
+  Map<String, dynamic> getConfigurationStatus() {
+    return {
+      'configuredHosts': SSLPinningConfig.configuredHosts,
+      'defaultHost': SSLPinningConfig.defaultHost,
+      'hasRemoteConfig': SSLPinningConfig.configuredHosts.isNotEmpty,
+    };
   }
   
   // Get configured Dio instance

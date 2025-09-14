@@ -32,22 +32,42 @@ Create a dedicated manager for handling certificate pinning:
 import Foundation
 import Security
 import CommonCrypto
+import FirebaseCore
+import FirebaseRemoteConfig
 
 class SSLPinningManager: NSObject {
     
-    // MARK: - Configuration
+    // MARK: - Remote Configuration Models
+    
+    struct RemoteSSLConfig: Codable {
+        let hosts: String
+        let enabled: Bool
+        let pins: SSLPins
+    }
+    
+    struct SSLPins: Codable {
+        let primary: String
+        let backup: String
+        let emergency: String
+        
+        var allHashes: [String] {
+            return [primary, backup, emergency]
+        }
+    }
+    
+    struct RemoteConfigResponse: Codable {
+        let configurations: [RemoteSSLConfig]
+    }
     
     struct PinConfiguration {
         let host: String
         let pinnedHashes: Set<String>
-        let backupHashes: Set<String>
-        let killSwitchEnabled: Bool
+        let enabled: Bool
         
-        init(host: String, pinnedHashes: [String], backupHashes: [String] = [], killSwitchEnabled: Bool = false) {
+        init(host: String, pinnedHashes: [String], enabled: Bool = true) {
             self.host = host
             self.pinnedHashes = Set(pinnedHashes)
-            self.backupHashes = Set(backupHashes)
-            self.killSwitchEnabled = killSwitchEnabled
+            self.enabled = enabled
         }
     }
     
@@ -55,6 +75,17 @@ class SSLPinningManager: NSObject {
     
     private var pinConfigurations: [String: PinConfiguration] = [:]
     private let logger = SSLPinningLogger()
+    private let remoteConfigKey = "ssl_pinning_configurations"
+    private let configCacheKey = "ssl_pinning_remote_config"
+    private var remoteConfig: RemoteConfig?
+    
+    // Fallback configuration
+    private let defaultHost = "apigee.kreditplus.com"
+    private let fallbackHashes = [
+        "sha256/AAAB3NzaC1yc2EAAAA...",
+        "sha256/BBBF4OzaC1yc2EAAAA...",
+        "sha256/CCCG5PzaC1yc2EAAAA..."
+    ]
     
     // MARK: - Singleton
     
@@ -62,7 +93,41 @@ class SSLPinningManager: NSObject {
     
     private override init() {
         super.init()
-        loadConfiguration()
+        setupFirebase()
+        Task {
+            await loadRemoteConfiguration()
+        }
+    }
+    
+    private func setupFirebase() {
+        FirebaseApp.configure()
+        remoteConfig = RemoteConfig.remoteConfig()
+        
+        let settings = RemoteConfigSettings()
+        settings.minimumFetchInterval = 3600 // 1 hour
+        remoteConfig?.configSettings = settings
+        
+        // Set default values
+        let defaultValues = [
+            remoteConfigKey: """
+            {
+                "configurations": [
+                    {
+                        "hosts": "\(defaultHost)",
+                        "enabled": true,
+                        "pins": {
+                            "primary": "\(fallbackHashes[0])",
+                            "backup": "\(fallbackHashes[1])",
+                            "emergency": "\(fallbackHashes[2])"
+                        }
+                    }
+                ]
+            }
+            """
+        ]
+        remoteConfig?.setDefaults(defaultValues)
+        
+        logger.logFirebaseRemoteConfigInitialized()
     }
     
     // MARK: - Configuration Management
@@ -78,18 +143,119 @@ class SSLPinningManager: NSObject {
         logger.logConfiguration(host: host, hashCount: pinnedHashes.count + backupHashes.count)
     }
     
-    private func loadConfiguration() {
-        // Example configuration - replace with your actual Apigee domain and hashes
-        configure(
-            host: "your-apigee-domain.com",
-            pinnedHashes: [
-                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", // Primary hash
-                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="  // Secondary hash
-            ],
-            backupHashes: [
-                "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="  // Backup hash
-            ]
+    // MARK: - Remote Configuration Management
+    
+    private func loadRemoteConfiguration() async {
+        do {
+            // Try to load from cache first
+            if let cachedConfig = loadCachedConfiguration() {
+                updatePinConfigurations(with: cachedConfig.configurations)
+            }
+            
+            // Fetch from Firebase Remote Config
+            await fetchFirebaseRemoteConfiguration()
+            
+            if pinConfigurations.isEmpty {
+                loadFallbackConfiguration()
+            }
+        } catch {
+            logger.logRemoteConfigError(error: error)
+            loadFallbackConfiguration()
+        }
+    }
+    
+    private func fetchFirebaseRemoteConfiguration() async {
+        do {
+            // Fetch and activate Firebase Remote Config
+            let status = try await remoteConfig?.fetchAndActivate()
+            
+            if status == .successFetchedFromRemote || status == .successUsingPreFetchedData {
+                // Get SSL pinning configuration
+                let configValue = remoteConfig?.configValue(forKey: remoteConfigKey)
+                let configString = configValue?.stringValue ?? ""
+                
+                if !configString.isEmpty {
+                    let configData = Data(configString.utf8)
+                    let remoteConfigResponse = try JSONDecoder().decode(RemoteConfigResponse.self, from: configData)
+                    
+                    updatePinConfigurations(with: remoteConfigResponse.configurations)
+                    
+                    // Cache the configuration
+                    UserDefaults.standard.set(configData, forKey: configCacheKey)
+                    
+                    logger.logFirebaseRemoteConfigUpdated()
+                } else {
+                    logger.logEmptyFirebaseRemoteConfig()
+                    if pinConfigurations.isEmpty {
+                        loadFallbackConfiguration()
+                    }
+                }
+            } else {
+                logger.logFirebaseRemoteConfigFetchFailed()
+                if pinConfigurations.isEmpty {
+                    loadFallbackConfiguration()
+                }
+            }
+        } catch {
+            logger.logFirebaseRemoteConfigFetchError(error: error)
+            if pinConfigurations.isEmpty {
+                loadFallbackConfiguration()
+            }
+        }
+    }
+    
+    private func loadCachedConfiguration() -> RemoteConfigResponse? {
+        guard let data = UserDefaults.standard.data(forKey: configCacheKey) else {
+            return nil
+        }
+        
+        return try? JSONDecoder().decode(RemoteConfigResponse.self, from: data)
+    }
+    
+    private func updatePinConfigurations(with configurations: [RemoteSSLConfig]) {
+        pinConfigurations.removeAll()
+        
+        for config in configurations {
+            let decryptedHashes = decryptPins(config.pins.allHashes)
+            let pinConfig = PinConfiguration(
+                host: config.hosts,
+                pinnedHashes: decryptedHashes,
+                enabled: config.enabled
+            )
+            pinConfigurations[config.hosts] = pinConfig
+        }
+        
+        logger.logConfigurationUpdated(hostCount: configurations.count)
+    }
+    
+    private func loadFallbackConfiguration() {
+        let config = PinConfiguration(
+            host: defaultHost,
+            pinnedHashes: fallbackHashes,
+            enabled: true
         )
+        pinConfigurations[defaultHost] = config
+        logger.logFallbackConfigurationLoaded()
+    }
+    
+    private func decryptPins(_ encryptedPins: [String]) -> [String] {
+        // TODO: Implement decryption logic based on your encryption method
+        // For now, return as-is assuming they're already decrypted for demo
+        return encryptedPins
+    }
+    
+    // MARK: - Public Methods
+    
+    func refreshRemoteConfiguration() async {
+        await fetchFirebaseRemoteConfiguration()
+    }
+    
+    func getConfigurationStatus() -> [String: Any] {
+        return [
+            "configuredHosts": Array(pinConfigurations.keys),
+            "defaultHost": defaultHost,
+            "hasRemoteConfig": !pinConfigurations.isEmpty
+        ]
     }
     
     private func checkKillSwitch() -> Bool {
@@ -121,16 +287,27 @@ class SSLPinningManager: NSObject {
     // MARK: - Certificate Validation
     
     func validateCertificateChain(_ trust: SecTrust, for host: String) -> Bool {
-        // Check if kill switch is enabled
-        if pinConfigurations[host]?.killSwitchEnabled == true {
-            logger.logKillSwitchActivated(host: host)
-            return true // Allow connection when kill switch is active
+        guard let config = pinConfigurations[host] else {
+            // Try to find configuration by matching any configured host
+            let matchingConfig = pinConfigurations.values.first { _ in true }
+            guard let defaultConfig = matchingConfig ?? pinConfigurations[defaultHost] else {
+                logger.logNoPinConfiguration(host: host)
+                return false
+            }
+            // Use default configuration if no specific host configuration found
+            return validateWithConfiguration(trust, config: defaultConfig, host: host)
         }
         
-        guard let config = pinConfigurations[host] else {
-            logger.logNoPinConfiguration(host: host)
-            return false
+        // Check if SSL pinning is enabled for this host
+        if !config.enabled {
+            logger.logPinningDisabledForHost(host: host)
+            return true // Allow connection when pinning is disabled
         }
+        
+        return validateWithConfiguration(trust, config: config, host: host)
+    }
+    
+    private func validateWithConfiguration(_ trust: SecTrust, config: PinConfiguration, host: String) -> Bool {
         
         // Extract certificates from trust
         let certificateCount = SecTrustGetCertificateCount(trust)
@@ -148,7 +325,7 @@ class SSLPinningManager: NSObject {
             }
             
             // Check against pinned hashes
-            if config.pinnedHashes.contains(publicKeyHash) || config.backupHashes.contains(publicKeyHash) {
+            if config.pinnedHashes.contains(publicKeyHash) {
                 logger.logPinValidationSuccess(host: host, hash: publicKeyHash)
                 return true
             }
@@ -212,8 +389,52 @@ class SSLPinningLogger {
         os_log("SSL Pin validation FAILED for host: %@ (checked %d certificates)", log: logger, type: .error, host, certificateCount)
     }
     
-    func logKillSwitchActivated(host: String) {
-        os_log("SSL Pinning kill switch ACTIVATED for host: %@", log: logger, type: .info, host)
+    func logPinningDisabledForHost(host: String) {
+        os_log("SSL Pinning DISABLED for host: %@", log: logger, type: .info, host)
+    }
+    
+    func logRemoteConfigUpdated() {
+        os_log("Remote SSL configuration updated successfully", log: logger, type: .info)
+    }
+    
+    func logRemoteConfigError(error: Error) {
+        os_log("Remote SSL configuration error: %@", log: logger, type: .error, error.localizedDescription)
+    }
+    
+    func logRemoteConfigFetchError(error: Error) {
+        os_log("Failed to fetch remote SSL configuration: %@", log: logger, type: .error, error.localizedDescription)
+    }
+    
+    func logInvalidConfigURL() {
+        os_log("Invalid remote configuration URL", log: logger, type: .error)
+    }
+    
+    func logFallbackConfigurationLoaded() {
+        os_log("Fallback SSL configuration loaded", log: logger, type: .info)
+    }
+    
+    func logConfigurationUpdated(hostCount: Int) {
+        os_log("SSL Pin configuration updated for %d hosts", log: logger, type: .info, hostCount)
+    }
+    
+    func logFirebaseRemoteConfigInitialized() {
+        os_log("Firebase Remote Config initialized", log: logger, type: .info)
+    }
+    
+    func logFirebaseRemoteConfigUpdated() {
+        os_log("Firebase Remote SSL configuration updated successfully", log: logger, type: .info)
+    }
+    
+    func logFirebaseRemoteConfigFetchError(error: Error) {
+        os_log("Failed to fetch Firebase Remote SSL configuration: %@", log: logger, type: .error, error.localizedDescription)
+    }
+    
+    func logFirebaseRemoteConfigFetchFailed() {
+        os_log("Firebase Remote Config fetch failed", log: logger, type: .error)
+    }
+    
+    func logEmptyFirebaseRemoteConfig() {
+        os_log("Empty configuration received from Firebase Remote Config", log: logger, type: .warning)
     }
     
     func logNoPinConfiguration(host: String) {

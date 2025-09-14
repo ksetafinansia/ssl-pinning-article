@@ -38,6 +38,13 @@ dependencies {
     implementation "androidx.lifecycle:lifecycle-livedata-ktx:2.6.2"
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
     
+    // Serialization for remote config
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0"
+    
+    // Firebase
+    implementation platform('com.google.firebase:firebase-bom:32.7.0')
+    implementation 'com.google.firebase:firebase-remote-config-ktx'
+    
     // Testing
     testImplementation "junit:junit:4.13.2"
     testImplementation "org.mockito:mockito-core:5.5.0"
@@ -57,8 +64,14 @@ Create a centralized manager for SSL pinning configuration:
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.decodeFromString
 import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
@@ -69,7 +82,16 @@ class SSLPinningManager private constructor(private val context: Context) {
     companion object {
         private const val TAG = "SSLPinningManager"
         private const val PREFS_NAME = "ssl_pinning_prefs"
-        private const val KILL_SWITCH_KEY = "ssl_pinning_kill_switch"
+        private const val REMOTE_CONFIG_KEY = "ssl_pinning_configurations"
+        private const val CONFIG_CACHE_KEY = "ssl_pinning_remote_config"
+        
+        // Fallback configuration
+        private const val DEFAULT_HOST = "apigee.kreditplus.com"
+        private val FALLBACK_HASHES = listOf(
+            "sha256/AAAB3NzaC1yc2EAAAA...",
+            "sha256/BBBF4OzaC1yc2EAAAA...",
+            "sha256/CCCG5PzaC1yc2EAAAA..."
+        )
         
         @Volatile
         private var INSTANCE: SSLPinningManager? = null
@@ -81,48 +103,205 @@ class SSLPinningManager private constructor(private val context: Context) {
         }
     }
     
+    @Serializable
+    data class RemoteSSLConfig(
+        val hosts: String,
+        val enabled: Boolean,
+        val pins: SSLPins
+    )
+    
+    @Serializable
+    data class SSLPins(
+        val primary: String,
+        val backup: String,
+        val emergency: String
+    ) {
+        val allHashes: List<String> get() = listOf(primary, backup, emergency)
+    }
+    
+    @Serializable
+    data class RemoteConfigResponse(
+        val configurations: List<RemoteSSLConfig>
+    )
+    
     data class PinConfiguration(
         val hostname: String,
         val pinnedHashes: Set<String>,
-        val backupHashes: Set<String> = emptySet(),
-        val isKillSwitchEnabled: Boolean = false
+        val enabled: Boolean = true
     )
     
     private val sharedPrefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val pinConfigurations = mutableMapOf<String, PinConfiguration>()
     private val logger = SSLPinningLogger()
+    private val json = Json { ignoreUnknownKeys = true }
+    private val remoteConfig: FirebaseRemoteConfig = Firebase.remoteConfig
     
     init {
-        loadConfiguration()
+        setupFirebaseRemoteConfig()
+        GlobalScope.launch {
+            loadRemoteConfiguration()
+        }
     }
     
-    private fun loadConfiguration() {
-        // Example configuration - replace with your actual Apigee domain and hashes
-        configurePinning(
-            hostname = "your-apigee-domain.com",
-            pinnedHashes = setOf(
-                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", // Primary hash
-                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="  // Secondary hash
-            ),
-            backupHashes = setOf(
-                "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC="  // Backup hash
+    private fun setupFirebaseRemoteConfig() {
+        val configSettings = remoteConfigSettings {
+            minimumFetchIntervalInSeconds = 3600 // 1 hour
+        }
+        remoteConfig.setConfigSettingsAsync(configSettings)
+        
+        // Set default values
+        val defaultConfigJson = json.encodeToString(
+            RemoteConfigResponse(
+                configurations = listOf(
+                    RemoteSSLConfig(
+                        hosts = DEFAULT_HOST,
+                        enabled = true,
+                        pins = SSLPins(
+                            primary = FALLBACK_HASHES[0],
+                            backup = FALLBACK_HASHES[1],
+                            emergency = FALLBACK_HASHES[2]
+                        )
+                    )
+                )
             )
         )
+        
+        remoteConfig.setDefaultsAsync(mapOf(REMOTE_CONFIG_KEY to defaultConfigJson))
+        logger.logFirebaseRemoteConfigInitialized()
     }
     
-    fun configurePinning(
-        hostname: String,
-        pinnedHashes: Set<String>,
-        backupHashes: Set<String> = emptySet()
-    ) {
+    // MARK: - Private Methods for Remote Configuration
+    
+    private suspend fun loadRemoteConfiguration() {
+        try {
+            // Try to load from cache first
+            loadCachedConfiguration()?.let { cachedConfig ->
+                updatePinConfigurations(cachedConfig.configurations)
+            }
+            
+            // Fetch from Firebase Remote Config
+            fetchFirebaseRemoteConfiguration()
+            
+            if (pinConfigurations.isEmpty) {
+                loadFallbackConfiguration()
+            }
+        } catch (e: Exception) {
+            logger.logRemoteConfigError(e)
+            loadFallbackConfiguration()
+        }
+    }
+    
+    private suspend fun fetchFirebaseRemoteConfiguration() {
+        try {
+            // Fetch and activate Firebase Remote Config
+            remoteConfig.fetchAndActivate().addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    val configString = remoteConfig.getString(REMOTE_CONFIG_KEY)
+                    
+                    if (configString.isNotEmpty()) {
+                        try {
+                            val remoteConfigResponse = json.decodeFromString<RemoteConfigResponse>(configString)
+                            updatePinConfigurations(remoteConfigResponse.configurations)
+                            
+                            // Cache the configuration
+                            sharedPrefs.edit()
+                                .putString(CONFIG_CACHE_KEY, configString)
+                                .apply()
+                            
+                            logger.logFirebaseRemoteConfigUpdated()
+                        } catch (e: Exception) {
+                            logger.logFirebaseRemoteConfigParseError(e)
+                            if (pinConfigurations.isEmpty) {
+                                loadFallbackConfiguration()
+                            }
+                        }
+                    } else {
+                        logger.logEmptyFirebaseRemoteConfig()
+                        if (pinConfigurations.isEmpty) {
+                            loadFallbackConfiguration()
+                        }
+                    }
+                } else {
+                    logger.logFirebaseRemoteConfigFetchFailed(task.exception)
+                    if (pinConfigurations.isEmpty) {
+                        loadFallbackConfiguration()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.logFirebaseRemoteConfigFetchError(e)
+            if (pinConfigurations.isEmpty) {
+                loadFallbackConfiguration()
+            }
+        }
+    }
+    
+    private fun loadCachedConfiguration(): RemoteConfigResponse? {
+        val cachedData = sharedPrefs.getString(CONFIG_CACHE_KEY, null)
+        return cachedData?.let { 
+            try {
+                json.decodeFromString<RemoteConfigResponse>(it)
+            } catch (e: Exception) {
+                logger.logCacheParseError(e)
+                null
+            }
+        }
+    }
+    
+    private fun updatePinConfigurations(configurations: List<RemoteSSLConfig>) {
+        pinConfigurations.clear()
+        
+        configurations.forEach { config ->
+            val decryptedHashes = decryptPins(config.pins.allHashes)
+            val pinConfig = PinConfiguration(
+                hostname = config.hosts,
+                pinnedHashes = decryptedHashes.toSet(),
+                enabled = config.enabled
+            )
+            pinConfigurations[config.hosts] = pinConfig
+        }
+        
+        logger.logConfigurationUpdated(configurations.size)
+    }
+    
+    private fun loadFallbackConfiguration() {
         val config = PinConfiguration(
-            hostname = hostname,
-            pinnedHashes = pinnedHashes,
-            backupHashes = backupHashes,
-            isKillSwitchEnabled = isKillSwitchEnabled()
+            hostname = DEFAULT_HOST,
+            pinnedHashes = FALLBACK_HASHES.toSet(),
+            enabled = true
         )
-        pinConfigurations[hostname] = config
-        logger.logConfiguration(hostname, pinnedHashes.size + backupHashes.size)
+        pinConfigurations[DEFAULT_HOST] = config
+        logger.logFallbackConfigurationLoaded()
+    }
+    
+    private fun decryptPins(encryptedPins: List<String>): List<String> {
+        // TODO: Implement decryption logic based on your encryption method
+        // For now, return as-is assuming they're already decrypted for demo
+        return encryptedPins
+    }
+    
+    // MARK: - Public Methods
+    
+    suspend fun refreshRemoteConfiguration() {
+        fetchRemoteConfiguration()
+    }
+    
+    fun getConfigurationStatus(): Map<String, Any> {
+        return mapOf(
+            "configuredHosts" to pinConfigurations.keys.toList(),
+            "defaultHost" to DEFAULT_HOST,
+            "hasRemoteConfig" to pinConfigurations.isNotEmpty()
+        )
+    }
+    
+    fun isEnabledForHost(hostname: String): Boolean {
+        return getConfigForHost(hostname)?.enabled ?: false
+    }
+    
+    private fun getConfigForHost(hostname: String): PinConfiguration? {
+        return pinConfigurations[hostname] 
+            ?: pinConfigurations[DEFAULT_HOST]
+            ?: pinConfigurations.values.firstOrNull()
     }
     
     fun createSecureOkHttpClient(): OkHttpClient {
@@ -131,12 +310,8 @@ class SSLPinningManager private constructor(private val context: Context) {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
         
-        // Add certificate pinner if kill switch is not enabled
-        if (!isKillSwitchEnabled()) {
-            builder.certificatePinner(createCertificatePinner())
-        } else {
-            logger.logKillSwitchActivated()
-        }
+        // Add certificate pinner with remote config support
+        builder.certificatePinner(createCertificatePinnerWithRemoteConfig())
         
         // Add custom TrustManager for additional validation
         val trustManager = createCustomTrustManager()
@@ -148,15 +323,19 @@ class SSLPinningManager private constructor(private val context: Context) {
         return builder.build()
     }
     
-    private fun createCertificatePinner(): CertificatePinner {
+    private fun createCertificatePinnerWithRemoteConfig(): CertificatePinner {
         val builder = CertificatePinner.Builder()
         
         pinConfigurations.forEach { (hostname, config) ->
-            config.pinnedHashes.forEach { hash ->
-                builder.add(hostname, "sha256/$hash")
-            }
-            config.backupHashes.forEach { hash ->
-                builder.add(hostname, "sha256/$hash")
+            if (config.enabled) {
+                config.pinnedHashes.forEach { hash ->
+                    // Remove sha256/ prefix if present, CertificatePinner will add it
+                    val cleanHash = hash.removePrefix("sha256/")
+                    builder.add(hostname, "sha256/$cleanHash")
+                }
+                logger.logPinningEnabledForHost(hostname, config.pinnedHashes.size)
+            } else {
+                logger.logPinningDisabledForHost(hostname)
             }
         }
         
@@ -175,8 +354,8 @@ class SSLPinningManager private constructor(private val context: Context) {
                 // Perform default validation first
                 defaultTrustManager.checkServerTrusted(chain, authType)
                 
-                // Additional custom validation if needed
-                validateCertificateChain(chain)
+                // Additional custom validation with remote config
+                validateCertificateChainWithRemoteConfig(chain)
             }
             
             override fun getAcceptedIssuers(): Array<X509Certificate> {
@@ -193,17 +372,30 @@ class SSLPinningManager private constructor(private val context: Context) {
             .first()
     }
     
-    private fun validateCertificateChain(chain: Array<X509Certificate>) {
-        if (isKillSwitchEnabled()) {
-            logger.logKillSwitchActivated()
-            return
-        }
-        
-        // Additional validation logic here
+    private fun validateCertificateChainWithRemoteConfig(chain: Array<X509Certificate>) {
+        // Additional validation logic with remote config
         chain.forEach { certificate ->
             val publicKeyHash = generatePublicKeyHash(certificate)
-            logger.logCertificateValidation(certificate.subjectDN.name, publicKeyHash)
+            val subjectName = certificate.subjectDN.name
+            
+            // Extract hostname from certificate subject or use a different method
+            val hostname = extractHostnameFromSubject(subjectName) ?: DEFAULT_HOST
+            val config = getConfigForHost(hostname)
+            
+            if (config?.enabled == true) {
+                logger.logCertificateValidation(subjectName, publicKeyHash)
+            } else {
+                logger.logCertificateValidationSkipped(subjectName)
+            }
         }
+    }
+    
+    private fun extractHostnameFromSubject(subjectName: String): String? {
+        // Simple extraction - in production, use proper certificate parsing
+        return subjectName.split(",")
+            .find { it.trim().startsWith("CN=") }
+            ?.substringAfter("CN=")
+            ?.trim()
     }
     
     private fun generatePublicKeyHash(certificate: X509Certificate): String {
@@ -258,8 +450,48 @@ class SSLPinningLogger {
         Log.e(TAG, "SSL Pin validation FAILED for hostname: $hostname - Reason: $reason")
     }
     
-    fun logKillSwitchActivated() {
-        Log.w(TAG, "SSL Pinning kill switch ACTIVATED - Pinning disabled")
+    fun logPinningEnabledForHost(hostname: String, hashCount: Int) {
+        Log.i(TAG, "SSL Pinning ENABLED for hostname: $hostname with $hashCount hashes")
+    }
+    
+    fun logPinningDisabledForHost(hostname: String) {
+        Log.w(TAG, "SSL Pinning DISABLED for hostname: $hostname")
+    }
+    
+    fun logFirebaseRemoteConfigUpdated() {
+        Log.i(TAG, "Firebase Remote SSL configuration updated successfully")
+    }
+    
+    fun logFirebaseRemoteConfigFetchFailed(error: Throwable?) {
+        Log.e(TAG, "Failed to fetch Firebase Remote SSL configuration", error)
+    }
+    
+    fun logFirebaseRemoteConfigFetchError(error: Throwable) {
+        Log.e(TAG, "Firebase Remote SSL configuration fetch error", error)
+    }
+    
+    fun logFirebaseRemoteConfigParseError(error: Throwable) {
+        Log.e(TAG, "Failed to parse Firebase Remote SSL configuration", error)
+    }
+    
+    fun logEmptyFirebaseRemoteConfig() {
+        Log.w(TAG, "Firebase Remote SSL configuration is empty")
+    }
+    
+    fun logCacheParseError(error: Throwable) {
+        Log.e(TAG, "Failed to parse cached SSL configuration", error)
+    }
+    
+    fun logFallbackConfigurationLoaded() {
+        Log.w(TAG, "Fallback SSL configuration loaded")
+    }
+    
+    fun logConfigurationUpdated(hostCount: Int) {
+        Log.i(TAG, "SSL Pin configuration updated for $hostCount hosts")
+    }
+    
+    fun logCertificateValidationSkipped(subject: String) {
+        Log.d(TAG, "Certificate validation skipped for subject: $subject")
     }
     
     fun logKillSwitchEnabled() {
