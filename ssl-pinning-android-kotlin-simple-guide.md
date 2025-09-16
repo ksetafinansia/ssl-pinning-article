@@ -44,7 +44,6 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
   "configurations": [
     {
       "host": "apigee.kreditplus.com",
-      "is_enabled": true,
       "is_android_enable": true,
       "is_ios_enable": true,
       "pins": {
@@ -57,7 +56,7 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
 }
 ```
 
-**Note**: Android implementation only checks the `is_enabled` flag, not the platform-specific flags.
+**Note**: Android implementation checks the `is_android_enable` flag for platform-specific control.
 
 ## 3. Core Implementation Components
 
@@ -67,10 +66,8 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
 @Serializable
 data class RemoteSSLConfig(
     val host: String,
-    @SerialName("is_enabled")
-    val isEnabled: Boolean,
     @SerialName("is_android_enable") 
-    val isAndroidEnable: Boolean? = null, // Not used in Android logic
+    val isAndroidEnable: Boolean,
     @SerialName("is_ios_enable")
     val isIosEnable: Boolean? = null,     // Not used in Android logic
     val pins: SSLPins
@@ -114,7 +111,7 @@ class SSLPinningManager private constructor(private val context: Context) {
     // - setupFirebaseRemoteConfig() - Configure Firebase Remote Config
     // - fetchFirebaseRemoteConfiguration() - Fetch from Firebase
     // - getConfigForHost(String host) - Get config for specific host
-    // - isEnabledForHost(String host) - Check if pinning enabled (only checks is_enabled)
+    // - isEnabledForHost(String host) - Check if pinning enabled (checks is_android_enable)
     // - createSecureOkHttpClient() - Create OkHttp client with SSL pinning
 }
 ```
@@ -145,12 +142,12 @@ private fun setupFirebaseRemoteConfig() {
 
 ### Step 2: Certificate Validation Logic
 
-Android implementation only checks the master `is_enabled` flag:
+Android implementation checks the `is_android_enable` flag:
 
 ```kotlin
 fun isEnabledForHost(host: String): Boolean {
     val config = getConfigForHost(host)
-    return config?.isEnabled ?: false
+    return config?.isAndroidEnable ?: false
 }
 ```
 
@@ -162,7 +159,7 @@ Create secure OkHttp client with certificate pinning:
 fun createSecureOkHttpClient(): OkHttpClient {
     val certificatePinner = CertificatePinner.Builder().apply {
         pinConfigurations.forEach { config ->
-            if (config.isEnabled) {
+            if (config.isAndroidEnable) {
                 val decryptedHashes = decryptPins(config.pins.getAllHashes())
                 decryptedHashes.forEach { hash ->
                     add(config.host, hash)
@@ -236,7 +233,7 @@ private fun loadFallbackConfiguration() {
     pinConfigurations = mutableListOf(
         RemoteSSLConfig(
             host = "apigee.kreditplus.com",
-            isEnabled = true,
+            isAndroidEnable = true,
             pins = SSLPins(
                 primary = "sha256/[FALLBACK_HASH_1]",
                 backup = "sha256/[FALLBACK_HASH_2]",
@@ -252,7 +249,7 @@ private fun loadFallbackConfiguration() {
 ### A. Unit Tests
 - Test configuration parsing and validation
 - Test hash decryption logic
-- Test enable/disable logic (only `is_enabled` flag)
+- Test enable/disable logic (only `is_android_enable` flag)
 
 ### B. Integration Tests
 - Test Firebase Remote Config integration
@@ -336,7 +333,7 @@ class SSLPinningLogger {
 ```
 
 ### B. Gradual Rollout
-- Start with kill switch enabled (`is_enabled: false`)
+- Start with kill switch enabled (`is_android_enable: false`)
 - Gradually enable for user segments
 - Monitor error rates and crash reports
 
@@ -350,7 +347,7 @@ class SSLPinningLogger {
 - [ ] Firebase project setup and Remote Config enabled
 - [ ] SSL pinning data models implemented
 - [ ] Firebase Remote Config integration completed
-- [ ] Certificate validation logic implemented (checks only `is_enabled`)
+- [ ] Certificate validation logic implemented (checks only `is_android_enable`)
 - [ ] OkHttp/Retrofit integration with certificate pinning
 - [ ] Local caching and offline support
 - [ ] Fallback configuration for network failures
@@ -363,7 +360,7 @@ class SSLPinningLogger {
 ## Common Pitfalls to Avoid
 
 1. **Hardcoding Certificates**: Always use Firebase Remote Config
-2. **Platform Flag Confusion**: Android only checks `is_enabled`, ignore platform flags
+2. **Platform Flag Confusion**: Android only checks `is_android_enable` flag
 3. **Poor Error Handling**: Distinguish between security and network errors
 4. **No Offline Support**: Always implement local caching and fallback
 5. **Insufficient Testing**: Test with various certificate and network scenarios

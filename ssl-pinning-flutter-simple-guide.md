@@ -33,7 +33,6 @@ Firebase Remote Config should store SSL pinning configurations with this JSON st
   "configurations": [
     {
       "host": "apigee.kreditplus.com",
-      "is_enabled": true,
       "is_android_enable": true,
       "is_ios_enable": true,
       "pins": {
@@ -72,7 +71,6 @@ class SSLPinningConfig {
 ```dart
 class RemoteSSLConfig {
   final String host;
-  final bool isEnabled;
   final bool isAndroidEnable;
   final bool isIosEnable;
   final SSLPins pins;
@@ -126,13 +124,13 @@ bool validateCertificate(X509Certificate cert, String hostname) {
 ```dart
 bool isEnabledForHost(String host) {
   final config = getConfigForHost(host);
-  if (config == null || !config.isEnabled) return false;
+  if (config == null) return false;
   
   // Platform-specific checks
-  if (Platform.isAndroid && !config.isAndroidEnable) return false;
-  if (Platform.isIOS && !config.isIosEnable) return false;
+  if (Platform.isAndroid) return config.isAndroidEnable;
+  if (Platform.isIOS) return config.isIosEnable;
   
-  return true;
+  return false;
 }
 ```
 

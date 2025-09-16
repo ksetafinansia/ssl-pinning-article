@@ -16,16 +16,11 @@ This comprehensive documentation suite provides everything needed to implement S
 
 ### 📱 Platform Implementations
 
-#### Complete Implementation Guides
-5. [Flutter Dart - Complete Implementation](#flutter-dart-complete-implementation)
-6. [Android Kotlin - Complete Implementation](#android-kotlin-complete-implementation)
-7. [iOS Swift - Complete Implementation](#ios-swift-complete-implementation)
+#### Platform Implementation Guides
+5. [Flutter Dart - Implementation Guide](#flutter-dart-implementation-guide)
+6. [Android Kotlin - Implementation Guide](#android-kotlin-implementation-guide)
+7. [iOS Swift - Implementation Guide](#ios-swift-implementation-guide)
 8. [Nuxt.js - Complete Implementation](#nuxtjs-complete-implementation)
-
-#### Simple Implementation Guides
-9. [Flutter Dart - Simple Guide](#flutter-dart-simple-guide)
-10. [Android Kotlin - Simple Guide](#android-kotlin-simple-guide)
-11. [iOS Swift - Simple Guide](#ios-swift-simple-guide)
 
 ---
 
@@ -59,10 +54,9 @@ This comprehensive documentation suite provides everything needed to implement S
   - Security considerations and best practices
 - **Key Concepts**:
   - `host`: Single hostname per configuration
-  - `is_enabled`: Master enable/disable flag
-  - `is_android_enable`: Flutter Android-specific control
-  - `is_ios_enable`: Flutter iOS-specific control
-  - Platform logic differences between Flutter and native apps
+  - `is_android_enable`: Android platform-specific control
+  - `is_ios_enable`: iOS platform-specific control
+  - Each platform checks only its respective flag
 
 #### SSL Pinning Implementation Guide
 **File**: `ssl-pinning-implementation-guide.md`
@@ -73,64 +67,9 @@ This comprehensive documentation suite provides everything needed to implement S
 
 ### 📱 Platform Implementations
 
-#### Complete Implementation Guides
+#### Platform Implementation Guides
 
-These guides provide comprehensive, production-ready implementations with full code samples:
-
-##### Flutter Dart - Complete Implementation
-**File**: `ssl-pinning-flutter-dart.md`
-- **Platform**: Flutter (Cross-platform)
-- **Content**: 
-  - Firebase Remote Config integration
-  - Platform-specific logic (checks both `is_enabled` and platform flags)
-  - Dio HTTP client with SSL pinning
-  - Provider pattern for state management
-  - Comprehensive error handling
-  - UI integration examples
-  - Testing strategies
-- **Key Features**:
-  - Plugin-based and manual implementation options
-  - Cross-platform certificate validation
-  - Kill switch functionality
-  - Offline caching support
-- **Dependencies**: dio, firebase_remote_config, provider, crypto
-- **Target Audience**: Flutter developers building cross-platform apps
-
-##### Android Kotlin - Complete Implementation  
-**File**: `ssl-pinning-android-kotlin.md`
-- **Platform**: Android Native
-- **Content**:
-  - Firebase Remote Config integration
-  - Native Android logic (checks only `is_enabled` flag)
-  - OkHttp certificate pinning
-  - Retrofit integration
-  - Kotlin coroutines for async operations
-  - SharedPreferences for caching
-- **Key Features**:
-  - Native Android certificate validation
-  - OkHttp CertificatePinner integration
-  - Coroutine-based async operations
-  - Kill switch via remote config
-- **Dependencies**: Firebase BOM, OkHttp, Retrofit, Kotlinx Serialization
-- **Target Audience**: Android native developers
-
-##### iOS Swift - Complete Implementation
-**File**: `ssl-pinning-ios-swift.md`  
-- **Platform**: iOS Native
-- **Content**:
-  - Firebase Remote Config integration
-  - Native iOS logic (checks only `is_enabled` flag)
-  - URLSession delegate-based certificate validation
-  - Alamofire ServerTrustManager integration
-  - iOS Keychain for secure storage
-  - Background queue operations
-- **Key Features**:
-  - URLSession and Alamofire support
-  - iOS Keychain integration
-  - Certificate transparency validation
-  - App Store compliance considerations
-- **Dependencies**: Firebase/RemoteConfig, Alamofire (optional)
-- **Target Audience**: iOS native developers
+These guides provide essential concepts and implementation patterns for each platform:
 
 ##### Nuxt.js - Complete Implementation
 **File**: `ssl-pinning-nuxtjs-cms.md`
@@ -149,30 +88,56 @@ These guides provide comprehensive, production-ready implementations with full c
 - **Dependencies**: Firebase Admin SDK, Axios, Nuxt.js
 - **Target Audience**: Full-stack developers, CMS developers
 
-#### Simple Implementation Guides
-
-These guides focus on concepts and implementation patterns without full code samples:
-
-##### Flutter Dart - Simple Guide
+##### Flutter Dart - Implementation Guide
 **File**: `ssl-pinning-flutter-simple-guide.md`
-- **Purpose**: Essential concepts for Flutter SSL pinning
-- **Content**: Architecture overview, key components, implementation steps
-- **Target Audience**: Developers who want to understand concepts and implement independently
-- **Focus**: Platform-specific logic, Firebase integration patterns, testing strategies
+- **Platform**: Flutter (Cross-platform)
+- **Content**: 
+  - Firebase Remote Config integration
+  - Platform-specific logic (checks platform-specific flags)
+  - Dio HTTP client with SSL pinning concepts
+  - State management patterns
+  - Error handling strategies
+- **Key Features**:
+  - Cross-platform certificate validation
+  - Platform-specific enable/disable control
+  - Kill switch functionality
+  - Offline caching support
+- **Dependencies**: dio, firebase_remote_config, provider, crypto
+- **Target Audience**: Flutter developers building cross-platform apps
 
-##### Android Kotlin - Simple Guide  
+##### Android Kotlin - Implementation Guide  
 **File**: `ssl-pinning-android-kotlin-simple-guide.md`
-- **Purpose**: Essential concepts for Android SSL pinning
-- **Content**: Core components, OkHttp integration, Firebase setup
-- **Target Audience**: Android developers who prefer conceptual guidance
-- **Focus**: Native Android patterns, certificate validation, error handling
+- **Platform**: Android Native
+- **Content**:
+  - Firebase Remote Config integration
+  - Native Android logic (checks only `is_android_enable` flag)
+  - OkHttp certificate pinning concepts
+  - Retrofit integration patterns
+  - Kotlin coroutines for async operations
+- **Key Features**:
+  - Native Android certificate validation
+  - OkHttp CertificatePinner integration
+  - Platform-specific control
+  - Kill switch via remote config
+- **Dependencies**: Firebase BOM, OkHttp, Retrofit, Kotlinx Serialization
+- **Target Audience**: Android native developers
 
-##### iOS Swift - Simple Guide
-**File**: `ssl-pinning-ios-swift-simple-guide.md`
-- **Purpose**: Essential concepts for iOS SSL pinning  
-- **Content**: URLSession integration, Firebase setup, App Store considerations
-- **Target Audience**: iOS developers who prefer conceptual guidance
-- **Focus**: Native iOS patterns, Keychain usage, compliance considerations
+##### iOS Swift - Implementation Guide
+**File**: `ssl-pinning-ios-swift-simple-guide.md`  
+- **Platform**: iOS Native
+- **Content**:
+  - Firebase Remote Config integration
+  - Native iOS logic (checks only `is_ios_enable` flag)
+  - URLSession delegate-based certificate validation
+  - Alamofire ServerTrustManager integration concepts
+  - iOS Keychain for secure storage
+- **Key Features**:
+  - URLSession and Alamofire support
+  - iOS Keychain integration
+  - Platform-specific control
+  - App Store compliance considerations
+- **Dependencies**: Firebase/RemoteConfig, Alamofire (optional)
+- **Target Audience**: iOS native developers
 
 ---
 
@@ -183,11 +148,10 @@ Choose the right documentation based on your needs:
 | Scenario | Recommended Documents |
 |----------|----------------------|
 | **New to SSL Pinning** | 1. Server Public Key Extraction → 2. Remote Config Payload → 3. Implementation Guide |
-| **Flutter Development** | Remote Config Payload → Flutter Complete Implementation |
-| **Android Native** | Remote Config Payload → Android Complete Implementation |
-| **iOS Native** | Remote Config Payload → iOS Complete Implementation |  
+| **Flutter Development** | Remote Config Payload → Flutter Implementation Guide |
+| **Android Native** | Remote Config Payload → Android Implementation Guide |
+| **iOS Native** | Remote Config Payload → iOS Implementation Guide |  
 | **Web/CMS Development** | Remote Config Payload → Nuxt.js Implementation |
-| **Conceptual Understanding** | Simple Guides for your target platform |
 | **Architecture Planning** | Document Requirements → Implementation Guide |
 | **Security Review** | Document Requirements → Remote Config Payload → Implementation Guide |
 
@@ -212,7 +176,7 @@ Choose the right documentation based on your needs:
 
 ### Flutter (Cross-Platform)
 - ✅ Single codebase for iOS and Android
-- ✅ Platform-specific enable/disable flags
+- ✅ Platform-specific enable/disable flags (checks both `is_android_enable` and `is_ios_enable`)
 - ✅ Plugin-based and manual implementation options
 - ✅ Provider pattern for state management
 - ⚠️ Requires platform-specific testing
@@ -220,13 +184,14 @@ Choose the right documentation based on your needs:
 ### Android Native
 - ✅ Direct OkHttp integration
 - ✅ Native performance
-- ✅ Advanced Android-specific features
+- ✅ Platform-specific control (checks only `is_android_enable`)
 - ✅ Kotlin coroutines support
 - ❌ Android-only solution
 
 ### iOS Native  
 - ✅ Direct URLSession integration
 - ✅ iOS Keychain integration
+- ✅ Platform-specific control (checks only `is_ios_enable`)
 - ✅ App Store optimized
 - ✅ Native iOS performance
 - ❌ iOS-only solution
@@ -241,15 +206,15 @@ Choose the right documentation based on your needs:
 
 ### Universal Security Features
 - 🛡️ Multiple backup certificate hashes (primary, backup, emergency)
-- 🛡️ Remote kill switch capability via Firebase Remote Config
+- 🛡️ Platform-specific kill switch capability via Firebase Remote Config
 - 🛡️ Encrypted hash storage and transmission
 - 🛡️ Offline fallback configurations
 - 🛡️ Certificate validation logging (without sensitive data)
 
 ### Platform-Specific Security
-- **Flutter**: Platform-specific granular control
-- **Android**: ProGuard/R8 code obfuscation
-- **iOS**: Keychain secure storage, App Store compliance
+- **Flutter**: Platform-specific granular control (checks both Android and iOS flags)
+- **Android**: Platform-specific control (checks `is_android_enable`), ProGuard/R8 code obfuscation
+- **iOS**: Platform-specific control (checks `is_ios_enable`), Keychain secure storage, App Store compliance
 - **Web**: Server-side validation, environment isolation
 
 ## 🚀 Quick Start Guide
@@ -262,9 +227,8 @@ Choose the right documentation based on your needs:
 
 ### For Experienced Developers
 1. Review **Remote Config Payload Structure** for configuration format
-2. Jump to your platform's **Simple Implementation Guide** for concepts
-3. Implement using the patterns and architectures described
-4. Reference **Complete Implementation Guides** for specific code examples
+2. Jump to your platform's **Implementation Guide** for concepts and patterns
+3. Implement using the architectures and examples described
 
 ## 📞 Support and Maintenance
 

@@ -46,7 +46,6 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
   "configurations": [
     {
       "host": "apigee.kreditplus.com",
-      "is_enabled": true,
       "is_android_enable": true,
       "is_ios_enable": true,
       "pins": {
@@ -59,7 +58,7 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
 }
 ```
 
-**Note**: iOS implementation only checks the `is_enabled` flag, not the platform-specific flags.
+**Note**: iOS implementation checks the `is_ios_enable` flag for platform-specific control.
 
 ## 3. Core Implementation Components
 
@@ -68,14 +67,12 @@ Firebase Remote Config stores SSL pinning configurations with this JSON structur
 ```swift
 struct RemoteSSLConfig: Codable {
     let host: String
-    let isEnabled: Bool
     let isAndroidEnable: Bool? // Not used in iOS logic
-    let isIosEnable: Bool?     // Not used in iOS logic
+    let isIosEnable: Bool
     let pins: SSLPins
     
     enum CodingKeys: String, CodingKey {
         case host
-        case isEnabled = "is_enabled"
         case isAndroidEnable = "is_android_enable"
         case isIosEnable = "is_ios_enable"
         case pins
@@ -116,7 +113,7 @@ class SSLPinningManager {
     // - setupFirebaseRemoteConfig() - Configure Firebase Remote Config
     // - fetchFirebaseRemoteConfiguration() - Fetch from Firebase
     // - getConfigForHost(String host) - Get config for specific host
-    // - isEnabledForHost(String host) - Check if pinning enabled (only checks is_enabled)
+    // - isEnabledForHost(String host) - Check if pinning enabled (checks is_ios_enable)
     // - createSecureURLSession() - Create URLSession with SSL pinning
 }
 ```
@@ -146,12 +143,12 @@ private func setupFirebaseRemoteConfig() {
 
 ### Step 2: Certificate Validation Logic
 
-iOS implementation only checks the master `is_enabled` flag:
+iOS implementation checks the `is_ios_enable` flag:
 
 ```swift
 func isEnabledForHost(_ host: String) -> Bool {
     guard let config = getConfigForHost(host) else { return false }
-    return config.isEnabled
+    return config.isIosEnable
 }
 ```
 
@@ -221,7 +218,7 @@ private func createServerTrustEvaluators() -> [String: ServerTrustEvaluating] {
     var evaluators: [String: ServerTrustEvaluating] = [:]
     
     configurations.forEach { config in
-        if config.isEnabled {
+        if config.isIosEnable {
             let decryptedHashes = decryptPins(config.pins.allHashes)
             let publicKeys = decryptedHashes.compactMap { convertHashToPublicKey($0) }
             
@@ -279,7 +276,6 @@ private func loadFallbackConfiguration() {
     configurations = [
         RemoteSSLConfig(
             host: "apigee.kreditplus.com",
-            isEnabled: true,
             isAndroidEnable: true,
             isIosEnable: true,
             pins: SSLPins(
@@ -297,7 +293,7 @@ private func loadFallbackConfiguration() {
 ### A. Unit Tests
 - Test configuration parsing and validation
 - Test hash decryption logic
-- Test enable/disable logic (only `is_enabled` flag)
+- Test enable/disable logic (only `is_ios_enable` flag)
 
 ### B. Integration Tests
 - Test Firebase Remote Config integration
@@ -395,7 +391,7 @@ class SSLPinningLogger {
 ```
 
 ### B. Gradual Rollout
-- Start with kill switch enabled (`is_enabled: false`)
+- Start with kill switch enabled (`is_ios_enable: false`)
 - Gradually enable for user segments using Firebase Remote Config conditions
 - Monitor crash reports and error rates
 
@@ -409,7 +405,7 @@ class SSLPinningLogger {
 - [ ] Firebase project setup and Remote Config enabled
 - [ ] SSL pinning data models implemented
 - [ ] Firebase Remote Config integration completed
-- [ ] Certificate validation logic implemented (checks only `is_enabled`)
+- [ ] Certificate validation logic implemented (checks only `is_ios_enable`)
 - [ ] URLSession/Alamofire integration with certificate pinning
 - [ ] Local caching and offline support (UserDefaults/Keychain)
 - [ ] Fallback configuration for network failures
@@ -422,7 +418,7 @@ class SSLPinningLogger {
 ## Common Pitfalls to Avoid
 
 1. **Hardcoding Certificates**: Always use Firebase Remote Config
-2. **Platform Flag Confusion**: iOS only checks `is_enabled`, ignore platform flags
+2. **Platform Flag Confusion**: iOS only checks `is_ios_enable` flag
 3. **Poor Error Handling**: Distinguish between security and network errors
 4. **No Offline Support**: Always implement local caching and fallback
 5. **Insufficient Testing**: Test with various certificate and network scenarios
